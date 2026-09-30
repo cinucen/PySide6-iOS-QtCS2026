@@ -1,1 +1,3 @@
-# PySide6-iOS-QtCS2026
+# Qt Contributors Summit 2026
+
+Bringing PySide6 to iOS
