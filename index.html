@@ -1,0 +1,1381 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+  <title>Qt Contributors Summit 2026 - PySide6 iOS</title>
+
+  <link rel="stylesheet" href="reveal.js/dist/reset.css">
+  <link rel="stylesheet" href="reveal.js/dist/reveal.css">
+  <!-- Theme: base skeleton first, then one theme file that overrides its variables -->
+  <link rel="stylesheet" href="css/base-theme.css">
+  <link rel="stylesheet" href="css/qt-theme.css">
+  <!-- Deck styles: palette, layout, components, utilities -->
+  <link rel="stylesheet" href="css/slides.css">
+
+  <!-- Theme used for syntax highlighted code -->
+  <link rel="stylesheet" href="reveal.js/dist/plugin/highlight/monokai.css">
+</head>
+
+<body>
+  <div class="reveal">
+    <div class="slides">
+
+<!-- 1. TITLE -->
+<section data-no-header data-transition="fade-in fade-out" class="full-slide">
+  <div class="columns c60-40 v-center">
+   <div>
+    <h2 class="w400">Bringing <i class="qt-neon">PySide6</i> to iOS</h2>
+    <h4 class="w300">Qt for Python meets Qt for iOS</h4>
+    <hr class="qt-line"/>
+    <h4><i class="qt-neon w300">Ece Cinüçen</i></h4>
+    <br/>
+    <h5 class="w400">
+      <img class="clean-img" src="img/github_white.png"> cinucen<br>
+      <img class="clean-img" src="img/linkedin.png"> ecinucen
+    </h5>
+   </div>
+  </div>
+  <img class="side-image w-40" src="img/PPT-section-images-03.png" />
+  <aside class="notes">
+    <ul>
+      <li>Hi, I'm Ece, Qt for Python team (PySide) at The Qt Company</li>
+      <li>Project: PySide6 on iOS, part of Qt 6.12
+        <ul>
+          <li>Android has been supported for a while, iOS was the missing one</li>
+        </ul>
+      </li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 2. PLAN -->
+<section data-transition="fade-in fade-out">
+  <h3>What this talk covers</h3>
+  <ul class="x70">
+    <li class="fragment"><i class="python-yellow">PySide6</i> in five minutes, for Qt developers</li>
+    <li class="fragment">What changes when <i class="qt-neon">Qt for iOS</i> has to carry a Python interpreter</li>
+    <li class="fragment">How the deploy tool reuses <i class="qt-lemon">Qt's own metadata</i>: <code>.prl</code> files, CMake target files, <code>Q_IMPORT_PLUGIN</code></li>
+    <li class="fragment">Demo, status, and the gaps</li>
+    <li class="fragment">Questions I would like <b>your</b> input on</li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>Roughly: primer, the iOS design, the generator internals, demo, then discussion</li>
+      <li>The last item is the reason this talk is at QtCS and not only at a Python conference
+        <ul>
+          <li>Several rough edges are really "how do we get this from Qt's build metadata"</li>
+          <li>I will collect them on one slide near the end</li>
+        </ul>
+      </li>
+      <li>Interrupt anytime, especially in the generator part</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- ============================================================
+     PART 1: PYSIDE6 FOR QT DEVELOPERS
+     ============================================================ -->
+
+<!-- 3. PYSIDE6 FOR QT DEVELOPERS -->
+<section data-transition="fade-in fade-out">
+  <h3><i class="python-yellow">PySide6</i> is Qt with a different front door</h3>
+  <div class="columns c50-50 v-center">
+   <div>
+    <ul class="x70">
+      <li class="fragment">The Qt API, <b>generated</b> from the Qt headers by <i class="qt-neon">Shiboken</i>, not a hand-written subset</li>
+      <li class="fragment">One extension module per Qt module: <code>PySide6.QtCore</code>, <code>QtWidgets</code>, <code>QtQml</code>&hellip;</li>
+      <li class="fragment">Signals, slots and properties are decorators; the <code>QMetaObject</code> is built at runtime, no moc step</li>
+      <li class="fragment">QML types are registered from Python with <code>@QmlElement</code></li>
+    </ul>
+   </div>
+   <div>
+    <pre class="x50"><code class="python" data-trim data-noescape>
+    @QmlElement
+    class Counter(QObject):
+        countChanged = Signal(int)
+        _count = 0
+
+        @Property(int, notify=countChanged)
+        def count(self):
+            return self._count
+
+        @Slot()
+        def increment(self):
+            self._count += 1
+            self.countChanged.emit(self._count)
+    </code></pre>
+   </div>
+  </div>
+  <aside class="notes">
+    <ul>
+      <li>PySide6: the official Qt binding for Python, maintained by The Qt Company, LGPLv3 or commercial</li>
+      <li>Exposes the Qt API, not a subset: Qt docs map to Python almost one to one</li>
+      <li>Shiboken
+        <ul>
+          <li>Generator: reads the Qt headers with libclang, driven by typesystem XML files</li>
+          <li>Emits one wrapper .cpp/.h pair per wrapped Qt class, plus module init code</li>
+          <li>Each Qt module becomes one CPython extension module</li>
+        </ul>
+      </li>
+      <li>libpyside6 is what makes a Python class a real QObject
+        <ul>
+          <li>Signals, slots, properties, dynamic QMetaObject built from the Python class</li>
+          <li>libpyside6qml does the QML side: type registration, attached properties, list properties</li>
+        </ul>
+      </li>
+      <li>Snippet: a QML-registered QObject with a property, a signal and a slot
+        <ul>
+          <li>Same shape as the C++ equivalent with Q_PROPERTY / Q_OBJECT / QML_ELEMENT</li>
+        </ul>
+      </li>
+      <li>Matters later: everything in the generated bindings is C++, so for iOS it is cross-compiled</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 4. WHAT IS IN A PYSIDE6 BUILD -->
+<section data-transition="fade-in fade-out">
+  <h3>What a <i class="python-yellow">PySide6</i> build consists of</h3>
+  <div class="columns c50-50 v-center">
+   <div>
+    <ul class="x70">
+      <li class="fragment"><b>Bindings</b>: generated at build time, one module per Qt module</li>
+      <li class="fragment"><code>libpyside6</code>, <code>libpyside6qml</code>: the Qt-specific glue</li>
+      <li class="fragment"><code>libshiboken6</code>: type registry, converters, object lifetime</li>
+      <li class="fragment">All of it links against <i class="qt-neon">Qt</i> and <i class="python-yellow">CPython</i></li>
+    </ul>
+   </div>
+   <div>
+    <div class="stack">
+      <p class="stack-title">your process</p>
+      <div class="stack-box">Your Python code</div>
+      <div class="stack-box">PySide6.QtCore, QtWidgets, QtQml&hellip;</div>
+      <div class="stack-box">libpyside6, libpyside6qml</div>
+      <div class="stack-box">libshiboken6</div>
+      <div class="stack-box">Qt + CPython</div>
+    </div>
+   </div>
+  </div>
+  <aside class="notes">
+    <ul>
+      <li>Three layers between your Python and Qt, and all are ordinary native code
+        <ul>
+          <li>Generated bindings: one per Qt module</li>
+          <li>libpyside6 / libpyside6qml: Qt-specific behaviour (signals, QMetaObject, QML registration)</li>
+          <li>libshiboken6: generic runtime for any Shiboken binding (type registry, converters, object ownership, signatures)</li>
+        </ul>
+      </li>
+      <li>The Python code that supports signatures (shibokensupport) is embedded into libshiboken6 itself, same as on desktop</li>
+      <li>Everything in the middle links against Qt and CPython
+        <ul>
+          <li>On desktop these links are dynamic</li>
+          <li>On iOS they are all resolved at link time of the app, next slides</li>
+        </ul>
+      </li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 5. DESKTOP AND ANDROID: DYNAMIC -->
+<section data-transition="fade-in fade-out">
+  <h3>Desktop and Android load everything at <i class="qt-lemon">runtime</i></h3>
+  <ul class="x70">
+    <li class="fragment"><code>import PySide6.QtWidgets</code> finds a shared library next to the package: <code>QtWidgets.abi3.so</code></li>
+    <li class="fragment">It links dynamically against the Qt libraries that ship in the wheel</li>
+    <li class="fragment">Qt finds its platform and image plugins at runtime; QML finds its plugins through <code>qmldir</code></li>
+    <li class="fragment">Android: same model, packaged into an APK by <code>pyside6-android-deploy</code></li>
+  </ul>
+  <p class="x70 fragment"><i class="qt-lemon">iOS</i> cannot do any of that.</p>
+  <aside class="notes">
+    <ul>
+      <li>Baseline everybody should have in mind before iOS
+        <ul>
+          <li>Python's import system looks on sys.path, finds a binary, dlopens it</li>
+          <li>That binary pulls in the Qt shared libraries; Qt then loads plugins from disk through QPluginLoader</li>
+          <li>QML plugins are found because qmldir names them and the import path points at them</li>
+        </ul>
+      </li>
+      <li>Desktop wheels are on PyPI, one wheel set per platform
+        <ul>
+          <li>abi3: one binary works across Python versions (limited API)</li>
+        </ul>
+      </li>
+      <li>Android has been supported for a while
+        <ul>
+          <li>Different packaging (buildozer and python-for-android), same dynamic model</li>
+          <li>The Android tool produces a finished package; the iOS tool will produce an Xcode project</li>
+        </ul>
+      </li>
+      <li>Everything that follows is about what replaces each of these runtime lookups on iOS</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- ============================================================
+     PART 2: PYSIDE6 ON IOS
+     ============================================================ -->
+
+<section data-transition="fade-in fade-out" data-background-image="img/background_cover.svg">
+  <h1 class="r-fit-text"><i class="python-yellow">Python</i> on an <i class="qt-neon">iPhone</i></h1>
+</section>
+
+<!-- 6. TEASER: PROVE IT FIRST -->
+<section data-transition="fade-in fade-out">
+  <h3>This already works</h3>
+  <video src="img/ios-device.mp4" controls preload="metadata" playsinline style="max-height: 460px;"></video>
+  <p class="x70 fragment">Plain <code>main.py</code>. Real device. Now let's see how.</p>
+  <aside class="notes">
+    <ul>
+      <li>It works!</li>
+      <li>In the clip: Xcode building the generated project for my phone, then the app running on the device</li>
+      <li>A PySide6 Widgets app, from a plain Python file; no Objective-C++ written by hand</li>
+      <li>Shown first, before the mechanism</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 7. WHAT IOS ASKS OF US -->
+<section data-transition="fade-in fade-out">
+  <h3>What iOS asks of us</h3>
+  <ul class="x70">
+    <li class="fragment">No system Python: <i class="python-yellow">interpreter and standard library ship inside the app</i></li>
+    <li class="fragment">An app can only run native code that was signed into it</li>
+    <li class="fragment">Build, sign and launch all go through <i class="qt-neon">Xcode</i></li>
+    <li class="fragment">Simulator and device are <b>different targets</b>, so different binaries</li>
+    <li class="fragment"><i class="qt-neon">Qt for iOS</i> is already static. Qt solved that half for C++.</li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>No pip on the device, no Python installed
+        <ul>
+          <li>Interpreter, standard library, Qt and PySide6 all packaged inside the app bundle</li>
+          <li>Layout set by the Python community's iOS support (PEP 730), and we follow it</li>
+          <li>Python for iOS comes from python.org as an XCframework</li>
+        </ul>
+      </li>
+      <li>Apple's rule: an app may only run code that was part of it when it was signed
+        <ul>
+          <li>So no dlopen of separate PySide6 .so files the way desktop does</li>
+        </ul>
+      </li>
+      <li>Simulator and device differ in platform, not only in CPU
+        <ul>
+          <li>An arm64 simulator binary and an arm64 device binary are both arm64, but different platforms (Mach-O LC_BUILD_VERSION)</li>
+          <li>Hence one wheel set per target later</li>
+        </ul>
+      </li>
+      <li>Last bullet: you already know this half
+        <ul>
+          <li>Qt for iOS ships static libraries, Qt's CMake finalizers import and link static plugins for you</li>
+          <li>Qt for iOS with shared libraries is possible too, but has its own problems, so the tool assumes the official static kit</li>
+        </ul>
+      </li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 8. TWO REGISTRIES: THE SPINE OF THE TALK -->
+<section data-transition="fade-in fade-out">
+  <h3>Static Qt, plus an interpreter: <i class="qt-lemon">two registries</i></h3>
+  <div class="columns c50-50 v-start">
+   <div>
+    <h5><i class="qt-neon">Qt</i>: static plugins</h5>
+    <pre class="x50"><code class="cpp" data-trim data-noescape>
+    Q_IMPORT_PLUGIN(QIOSIntegrationPlugin)
+    </code></pre>
+    <p class="x60 fragment">Linking <code>libqios.a</code> is not enough; the plugin must be imported by class name.</p>
+   </div>
+   <div>
+    <h5><i class="python-yellow">CPython</i>: built-in modules</h5>
+    <pre class="x50"><code class="cpp" data-trim data-noescape>
+    PyImport_AppendInittab("PySide6.QtCore",
+                           PyInit_QtCore);
+    </code></pre>
+    <p class="x60 fragment">With no <code>.so</code> to load, every module must be in the table before <code>Py_Initialize</code>.</p>
+   </div>
+  </div>
+  <p class="x70 fragment">There is no CMake project here. <code>pyside6-ios-deploy</code> fills <b>both</b> registries from Qt's own metadata and writes them into <code>main.mm</code>.</p>
+  <aside class="notes">
+    <ul>
+      <li>The one idea to take from this talk
+        <ul>
+          <li>On a static platform there are two independent registries that must be filled at build time</li>
+        </ul>
+      </li>
+      <li>Registry 1: Qt's static plugins
+        <ul>
+          <li>Familiar to everyone here: Q_IMPORT_PLUGIN(ClassName) somewhere in the final binary</li>
+          <li>In a CMake app, Qt's finalizers (qt_finalize_target) work out the plugin list and generate the imports</li>
+          <li>Verified on our side: link without the import and the plugin is not found at runtime</li>
+        </ul>
+      </li>
+      <li>Registry 2: CPython's built-in module table
+        <ul>
+          <li>PyImport_AppendInittab maps a module name to its PyInit_ function</li>
+          <li>After that, import PySide6.QtWidgets resolves to something already inside the binary</li>
+          <li>Must happen before the interpreter starts</li>
+        </ul>
+      </li>
+      <li>We do not generate a CMake project; we generate an Xcode project directly, so none of Qt's finalizer machinery runs
+        <ul>
+          <li>The tool therefore recomputes the same information from what the kit ships</li>
+          <li>Next slides: where each piece comes from</li>
+        </ul>
+      </li>
+      <li>Everything else follows from this: why the tool scans imports, why modules are fixed at build time</li>
+      <li>Likely question: why not qt_add_executable? &lt;your answer&gt;; I come back to it on the discussion slide</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 9. BUILDING BLOCKS -->
+<section data-transition="fade-in fade-out">
+  <h3>The building blocks</h3>
+  <div class="columns c60-40 v-center">
+   <div>
+    <ul class="x70">
+      <li class="fragment"><i class="python-yellow">Python 3.15</i> for iOS, from python.org (PEP 730)</li>
+      <li class="fragment"><i class="qt-neon">Qt</i> for iOS: the official kit, static frameworks</li>
+      <li class="fragment"><i class="qt-lemon">PySide6 + Shiboken</i>, cross-compiled as static archives</li>
+      <li class="fragment">Your app, as plain Python files</li>
+    </ul>
+   </div>
+   <div>
+    <div class="stack">
+      <p class="stack-title"><code>App.app</code></p>
+      <div class="stack-box">Your Python code</div>
+      <div class="stack-box">PySide6 + Shiboken</div>
+      <div class="stack-box">Qt for iOS</div>
+      <div class="stack-box">Python.xcframework</div>
+    </div>
+   </div>
+  </div>
+  <aside class="notes">
+    <ul>
+      <li>Four layers, nothing custom
+        <ul>
+          <li>Python.xcframework: distributed by python.org, embedded and signed with the app</li>
+          <li>Qt for iOS: the normal Qt kit from the Qt installer</li>
+          <li>PySide6 and Shiboken: cross-compiled by us, as static archives</li>
+          <li>Your application: plain Python, and QML if you use it</li>
+        </ul>
+      </li>
+      <li>Precision for this audience: Qt, PySide6 and libshiboken end up linked into the app binary
+        <ul>
+          <li>CPython itself stays the embedded Python framework</li>
+        </ul>
+      </li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 10. TWO STAGES -->
+<section data-transition="fade-in fade-out">
+  <h3>Two stages</h3>
+  <div class="columns c50-50">
+   <div>
+    <h5>1. Build the wheels</h5>
+    <ul class="x70">
+      <li>Cross-compile PySide6 against one Qt for iOS kit</li>
+      <li>Slow, done rarely</li>
+    </ul>
+   </div>
+   <div>
+    <h5>2. Deploy your app</h5>
+    <ul class="x70">
+      <li><code>pyside6-ios-deploy</code></li>
+      <li>Fast, done every time</li>
+    </ul>
+   </div>
+  </div>
+  <p class="x70">Same shape as <i class="qt-lemon">Android</i></p>
+  <aside class="notes">
+    <ul>
+      <li>If you know the Android deployment, this feels the same
+        <ul>
+          <li>Heavy cross-compilation is separate from the everyday tool</li>
+          <li>Orchestrator in tools/cross_compile_ios (Android: tools/cross_compile_android); deploy tool is pyside6-ios-deploy (Android: pyside6-android-deploy)</li>
+          <li>Both read their settings from pysidedeploy.spec, in the [ios] section</li>
+        </ul>
+      </li>
+      <li>One target = one platform and architecture: arm64 device, arm64 simulator, x86_64 simulator for Intel Macs</li>
+      <li>Wheels: build once per Qt version and target, install once, use across many projects</li>
+      <li>Think of stage 1 as "building a Qt-based SDK" and stage 2 as "using it"</li>
+      <li>Backup slide at the end compares Android and iOS side by side</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 11. STAGE 1 -->
+<section data-transition="fade-in fade-out">
+  <h3>Stage 1: cross-compile the wheels</h3>
+  <pre class="x60"><code class="bash" data-trim data-noescape>
+  $ python tools/cross_compile_ios/main.py \
+        --qt-install-path ~/Qt/6.12.0 \
+        --arch arm64 --simulator
+
+  dist_ios/pyside6-...-cp315-cp315-ios_arm64_simulator.whl
+  dist_ios/shiboken6-...-cp315-cp315-ios_arm64_simulator.whl
+  </code></pre>
+  <ul class="x70">
+    <li class="fragment">Needs <i class="qt-neon">Qt for iOS</i> and the matching <i class="qt-neon">Qt for macOS</i> from the Qt installer</li>
+    <li class="fragment">One run per target; the wheel tag records the target</li>
+    <li class="fragment"><b>Not</b> needed by app developers: wheels come from the Qt Downloads page, or <code>qtpip</code></li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>The slow part: compiles Shiboken's generated code and PySide6 against the Qt for iOS kit</li>
+      <li>--qt-install-path is the installer root; the tool picks the kit directories from it
+        <ul>
+          <li>ios_device or ios_simulator_&lt;arch&gt; for the target kit</li>
+          <li>macos for the host kit, which supplies the host tools during cross-compilation</li>
+          <li>Standard cross-compilation split: host Qt for tools, target Qt for what gets linked</li>
+        </ul>
+      </li>
+      <li>You choose the architecture and simulator or device; x86_64 implies simulator</li>
+      <li>Output is a normal wheel with an iOS platform tag, for example ios_arm64_simulator
+        <ul>
+          <li>The Python version is in the tag too (cp315): iOS wheels are tied to the Python they were built for, unlike the abi3 desktop and Android wheels</li>
+        </ul>
+      </li>
+      <li>Most app developers never run this: it is for whoever produces the wheels (us) and anyone building from source
+        <ul>
+          <li>Everyone else gets the wheels from the Qt Downloads page, or with qtpip, Qt's own pip tool (qtpip download PySide6 with the iOS options)</li>
+          <li>There is a --coin mode for Qt's CI, where the Qt layout is different</li>
+        </ul>
+      </li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 12. TOOLCHAIN -->
+<section data-transition="fade-in fade-out">
+  <h3>The toolchain is Qt's own, plus Python</h3>
+  <div class="columns c50-50 v-center">
+   <div>
+    <pre class="x40"><code class="cmake" data-trim data-noescape>
+    include(".../lib/cmake/Qt6/qt.toolchain.cmake")
+
+    set(CMAKE_OSX_SYSROOT iphonesimulator)
+    set(CMAKE_OSX_ARCHITECTURES "arm64")
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL
+        "iOS requires static libs" FORCE)
+
+    set(Python_INCLUDE_DIR
+        ".../Python.xcframework/ios-.../include/python3.15")
+    set(Python_SOABI
+        "cpython-315-iphonesimulator")
+    </code></pre>
+   </div>
+   <div>
+    <ul class="x70">
+      <li class="fragment">Rendered from a template; it <b>includes</b> the kit's <code>qt.toolchain.cmake</code></li>
+      <li class="fragment">Then the normal build: <code>setup.py bdist_wheel</code> with <code>--cmake-toolchain-file</code>, <code>--qt-host-path</code>, <code>--qt-target-path</code>, <code>--plat-name</code></li>
+      <li class="fragment">Python headers come from the matching slice of <code>Python.xcframework</code></li>
+    </ul>
+   </div>
+  </div>
+  <aside class="notes">
+    <ul>
+      <li>Excerpt of tools/cross_compile_ios/templates/toolchain_ios.tmpl.cmake, simplified
+        <ul>
+          <li>First thing it does is include Qt's own iOS toolchain from the kit, so we inherit Qt's iOS settings (deployment target, sysroot conventions)</li>
+          <li>The Qt cmake directory is queried from the kit (QT_INSTALL_CMAKEDIR) with a small CMake config test, not assumed to be lib/cmake</li>
+        </ul>
+      </li>
+      <li>We add: simulator vs device sysroot, architecture, static-only, and the Python location</li>
+      <li>Python_SOABI is set explicitly to a cpython-315-iphoneos / iphonesimulator value so extension modules are named for the right platform</li>
+      <li>The build is the regular PySide6 build driver
+        <ul>
+          <li>setup.py bdist_wheel --standalone, plus --cmake-toolchain-file, --qt-host-path, --qt-target-path, --python-target-path, --plat-name, --no-qt-tools</li>
+          <li>The orchestrator only prepares inputs (xcframework download, toolchain file); compilation is CMake inside build_scripts, same as Android</li>
+        </ul>
+      </li>
+      <li>The Python.xcframework is downloaded from python.org and checked against a pinned SHA-256, then cached under ~/.pyside6_ios</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 13. WHAT IS IN THE WHEEL -->
+<section data-transition="fade-in fade-out">
+  <h3>What is in the wheel</h3>
+  <div class="columns c60-40 v-center">
+   <div>
+    <pre class="x50"><code class="nohighlight" data-trim data-noescape>
+    PySide6/
+      libQtCore.a  libQtGui.a  libQtWidgets.a  ...
+      libpyside6.a  libpyside6qml.a
+      Qt/                       the Qt for iOS kit
+        lib/QtCore.framework/   static archive, Headers, .prl
+        lib/libQt6EntryPoint.a
+        plugins/   qml/   lib/cmake/
+    shiboken6/
+      libshiboken6.a  Shiboken.a
+    </code></pre>
+   </div>
+   <div>
+    <ul class="x70">
+      <li class="fragment">One static archive per binding module, each exporting <code>PyInit_&lt;Module&gt;</code></li>
+      <li class="fragment">The <b>whole kit</b> is inside, with headers and metadata</li>
+      <li class="fragment">So the wheel and the Qt it was built against can never drift apart</li>
+    </ul>
+   </div>
+  </div>
+  <aside class="notes">
+    <ul>
+      <li>Layout of the iOS PySide6 wheel as it is today
+        <ul>
+          <li>PySide6/libQt&lt;Module&gt;.a: one archive per binding module; the interesting symbol is PyInit_Qt&lt;Module&gt;</li>
+          <li>libpyside6.a and libpyside6qml.a; libshiboken6.a and Shiboken.a come from the shiboken6 wheel</li>
+          <li>PySide6/Qt: the Qt for iOS kit copied from --qt-install-path, static .framework bundles with Headers and .prl, plugins, qml modules, CMake package files, qt.toolchain.cmake</li>
+        </ul>
+      </li>
+      <li>Why embed the kit
+        <ul>
+          <li>The deploy tool needs the exact archives, .prl files and plugin metadata the bindings were built against</li>
+          <li>It also needs Qt's headers, because the generated main.mm includes QtCore/QtPlugin</li>
+          <li>Result: no separate Qt install on the app developer's machine</li>
+        </ul>
+      </li>
+      <li>Size: a wheel is on the order of 80 to 100 MB, and a 96 MB one unpacks to about 355 MB</li>
+      <li>The set of binding modules follows the kit: modules that are not in the kit are not in the wheel (limits slide)</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 14. STAGE 2 -->
+<section data-transition="fade-in fade-out">
+  <h3>Stage 2: <code>pyside6-ios-deploy</code></h3>
+  <pre class="x60"><code class="bash" data-trim data-noescape>
+  $ pyside6-ios-deploy main.py \
+        --wheel-pyside   pyside6-...-ios_arm64_simulator.whl \
+        --wheel-shiboken shiboken6-...-ios_arm64_simulator.whl
+
+  open deployment/ios_arm64_simulator/pyside_app_demo.xcodeproj
+  </code></pre>
+  <ul class="x70">
+    <li class="fragment">App + wheels in, <b>Xcode project</b> out</li>
+    <li class="fragment">Nothing is compiled; it takes seconds</li>
+    <li class="fragment">No <code>--simulator</code> flag: the target comes from the wheel's platform tag</li>
+    <li class="fragment">Settings are kept in <code>pysidedeploy.spec</code></li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>The day-to-day tool: main file and two wheels in, Xcode project out
+        <ul>
+          <li>Never compiles anything; rerun it whenever the configuration changes</li>
+          <li>Output goes to deployment/&lt;target tag&gt;: device and simulator projects do not overwrite each other</li>
+        </ul>
+      </li>
+      <li>What you need: a Mac with full Xcode (not only Command Line Tools), because the project is built with the iOS SDK and simulator runtimes
+        <ul>
+          <li>Device builds need an Apple Developer Team ID (--team-id); the simulator does not</li>
+          <li>Other flags: --name, --bundle-id, --app-version, --xcframework-path</li>
+        </ul>
+      </li>
+      <li>The target is never asked for
+        <ul>
+          <li>A wheel holds binaries for exactly one target, so the tool reads it from the wheel filename</li>
+          <li>It refuses to continue if the PySide6 and shiboken6 wheels disagree</li>
+          <li>Simulator to device: pass the device wheels, that is all</li>
+        </ul>
+      </li>
+      <li>Python.xcframework is downloaded and cached on first run, or you pass your own</li>
+      <li>The result is an Xcode project; signing and installing happen in Xcode</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 15. PIPELINE INSIDE THE TOOL -->
+<section data-transition="fade-in fade-out">
+  <h3>Inside the deploy tool</h3>
+  <div class="flow">
+    <div class="flow-step">spec + wheels</div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="flow-step">unpack, find modules</div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="flow-step">resolve against the kit</div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="flow-step"><code>main.mm</code> <code>Info.plist</code> <code>project.pbxproj</code></div>
+  </div>
+  <ul class="x70">
+    <li class="fragment">Your <b>Python and QML imports</b> decide which Qt modules the app needs</li>
+    <li class="fragment">The kit inside the wheel decides <b>what that means</b> for linking and registration</li>
+    <li class="fragment">Three steps follow: what to <i class="qt-lemon">link</i>, what to <i class="qt-lemon">register</i> with Qt, what to <i class="qt-lemon">register</i> with Python</li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>Same configuration base as the other deploy tools (pysidedeploy.spec), plus an [ios] section: wheels, xcframework path, bundle id, team id, deployment target, signing style</li>
+      <li>Unpack: wheels are extracted once and reused; the tool reads everything from the unpacked tree, including the Qt kit</li>
+      <li>Module detection scans your imports, and QML imports for QtQuick modules; the modules line in the spec can override it</li>
+      <li>Resolve: this is the interesting part, three problems that look similar but are not
+        <ul>
+          <li>What needs to be linked: .prl files</li>
+          <li>What needs to be registered with Qt: Q_IMPORT_PLUGIN</li>
+          <li>What needs to be registered with Python: the inittab</li>
+        </ul>
+      </li>
+      <li>Output: three generated files, covered after the three steps</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 16. STEP 1: .PRL -->
+<section data-transition="fade-in fade-out">
+  <h3>Step 1: what to link. Qt's <code>.prl</code> files</h3>
+  <div class="columns c50-50 v-center">
+   <div>
+    <pre class="x40"><code class="ini" data-trim data-noescape>
+    # QtCore.framework/QtCore.prl
+    QMAKE_PRL_CONFIG = static lib_bundle
+    QMAKE_PRL_LIBS_FOR_CMAKE =
+      -lz;
+      -framework IOKit;
+      -framework CoreFoundation;
+      -framework Foundation;
+      -lm;
+      $$[QT_INSTALL_LIBS]/libQt6BundledPcre2.a;
+      -framework MobileCoreServices;
+      -framework UIKit
+    </code></pre>
+   </div>
+   <div>
+    <ul class="x70">
+      <li class="fragment">Start from the imported modules, follow <code>-framework Qt*</code> into the kit</li>
+      <li class="fragment">Other <code>-framework</code>: Apple SDK frameworks</li>
+      <li class="fragment"><code>libQt6Bundled*.a</code> (pcre2, harfbuzz, freetype, libpng, libjpeg) and <code>qrc_*_init.cpp.o</code> resource initializers are linked explicitly</li>
+      <li class="fragment">Nothing is hand-listed, so it follows the kit it ships with</li>
+    </ul>
+   </div>
+  </div>
+  <aside class="notes">
+    <ul>
+      <li>Qt writes a .prl next to every module and plugin; QMAKE_PRL_LIBS_FOR_CMAKE lists what that library needs at link time
+        <ul>
+          <li>Other Qt modules, Apple system frameworks, Qt's bundled third-party static libs, resource object files, plain linker flags</li>
+        </ul>
+      </li>
+      <li>The tool walks it recursively from the app's modules, so the link closure is derived from Qt's metadata instead of a "link everything" list that would rot
+        <ul>
+          <li>The module itself is listed before its dependencies, so the static linker can satisfy undefined references in one pass</li>
+        </ul>
+      </li>
+      <li>Details worth knowing
+        <ul>
+          <li>The .prl contains placeholders such as $$[QT_INSTALL_LIBS] and $$[QT_INSTALL_PREFIX]; we substitute them from the kit's location and checked this against what qmake -query reports</li>
+          <li>Static libs and resource objects need explicit linking: the qrc_*_init.cpp.o objects are what register Qt's built-in resources (style resources, shaders) at startup</li>
+          <li>The plugins' .prl files are walked too, which is how a plugin can pull in a module the app never imported</li>
+          <li>Not in any .prl: -lresolv for QtNetwork (DNS symbols) and libQt6EntryPoint.a; both added by hand</li>
+        </ul>
+      </li>
+      <li>Sample is QtCore's .prl from the wheel, abridged</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 17. STEP 2: Q_IMPORT_PLUGIN -->
+<section data-transition="fade-in fade-out">
+  <h3>Step 2: what to register with Qt</h3>
+  <div class="columns c50-50 v-center">
+   <div>
+    <pre class="x40"><code class="cmake" data-trim data-noescape>
+    # Qt6QIOSIntegrationPluginTargets-release.cmake
+    IMPORTED_LOCATION_RELEASE
+      ".../plugins/platforms/libqios.a"
+
+    # Qt6QIOSIntegrationPluginTargets.cmake
+    QT_PLUGIN_CLASS_NAME "QIOSIntegrationPlugin"
+    </code></pre>
+    <pre class="x50"><code class="cpp" data-trim data-noescape>
+    Q_IMPORT_PLUGIN(QIOSIntegrationPlugin)
+    </code></pre>
+   </div>
+   <div>
+    <ul class="x70">
+      <li class="fragment">Always: iOS platform plugin, GIF, ICO, JPEG, SVG, SVG icons</li>
+      <li class="fragment">By module: <code>QtNetwork</code> adds the SecureTransport TLS backend, <code>QtSql</code> adds SQLite</li>
+      <li class="fragment">The archive name does not give the class name, so we match the archive path in Qt's CMake target files</li>
+    </ul>
+   </div>
+  </div>
+  <aside class="notes">
+    <ul>
+      <li>Same problem Qt's finalizer solves for a CMake app: for every static plugin we link, emit Q_IMPORT_PLUGIN(ClassName)
+        <ul>
+          <li>The class name is not derivable from the archive file name: libqios.a is QIOSIntegrationPlugin</li>
+          <li>The only place it lives for us is the CMake target files in lib/cmake: QT_PLUGIN_CLASS_NAME on the plugin's target</li>
+          <li>The tool matches the plugin's archive path against IMPORTED_LOCATION_RELEASE across lib/cmake, then reads the class name from the sibling targets file</li>
+        </ul>
+      </li>
+      <li>Checked empirically: leaving the import out reproduces "plugin not found" at runtime, even though the archive is linked</li>
+      <li>Which plugins
+        <ul>
+          <li>Always linked: libqios (platform), image formats (gif, ico, jpeg, svg), svg icon engine</li>
+          <li>Gated by module: QtNetwork brings TLS (securetransport) and network information, QtSql brings the SQLite driver</li>
+          <li>Six Darwin permission plugins (camera, microphone, bluetooth, contacts, calendar, location): linked always, but not imported here
+            <ul>
+              <li>PySide6's own glue code (qtcore.cpp, qtpositioning.cpp) already does Q_IMPORT_PLUGIN for all six, unconditionally, when PySide6 is built</li>
+              <li>Importing them again would double-register</li>
+            </ul>
+          </li>
+        </ul>
+      </li>
+      <li>The Qt bundled third-party libraries (harfbuzz, freetype and so on) are ordinary static libs, not plugins: no registration concept applies</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 18. QML PLUGINS -->
+<section data-transition="fade-in fade-out">
+  <h3>QML plugins: found through the <code>.prl</code>, too</h3>
+  <div class="columns c50-50 v-center">
+   <div>
+    <pre class="x50"><code class="cpp" data-trim data-noescape>
+    // editingmodel: 12 QML plugin imports
+    Q_IMPORT_PLUGIN(QtQuick2Plugin)
+    Q_IMPORT_PLUGIN(QtQmlPlugin)
+    Q_IMPORT_PLUGIN(QtQmlModelsPlugin)
+    Q_IMPORT_PLUGIN(QtQuickControls2Plugin)
+    Q_IMPORT_PLUGIN(QtQuickTemplates2Plugin)
+    Q_IMPORT_PLUGIN(QtQuickControls2IOSStylePlugin)
+    Q_IMPORT_PLUGIN(QtQuickControls2BasicStylePlugin)
+    // ...
+    </code></pre>
+   </div>
+   <div>
+    <ul class="x70">
+      <li class="fragment">The QML engine resolves <code>import</code> at runtime; the linker knows nothing about it</li>
+      <li class="fragment">Start from the QML imports in your app, follow the <code>qml/&lt;Module&gt;/objects-</code> paths in each plugin's <code>.prl</code></li>
+      <li class="fragment">No Controls style chosen: add the <b>iOS style</b>, Qt's platform default</li>
+      <li class="fragment">Your own QML directories are copied into the bundle</li>
+    </ul>
+   </div>
+  </div>
+  <aside class="notes">
+    <ul>
+      <li>QML plugins are different from regular modules
+        <ul>
+          <li>The QML engine resolves imports at runtime from qmldir, not the linker, so the normal module dependency chain does not apply</li>
+          <li>A QML plugin's dependencies on other QML modules show up in its .prl as resource object paths of the form qml/&lt;Module&gt;/objects-..., so that is what we parse</li>
+        </ul>
+      </li>
+      <li>Sample: generated imports for the editingmodel example, a QtQuick Controls app, abridged
+        <ul>
+          <li>Twelve QML plugin imports on top of the six always-on Qt plugins</li>
+          <li>Including the Basic style, because the iOS style depends on it</li>
+        </ul>
+      </li>
+      <li>If the app uses Controls without selecting a style, Qt's default depends on the platform, so we add the iOS style plugin</li>
+      <li>Class names for QML plugins come from lib/cmake/Qt6Qml/QmlPlugins, same trick as for regular plugins</li>
+      <li>App-local QML directories are copied next to the entry script, which is where engine.addImportPath(Path(__file__).parent) in the Python code looks</li>
+      <li>Both Widgets and QML apps work; QML needs libpyside6qml linked too, which the tool adds when QtQml or QtQuick are in use</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 19. STEP 3: INITTAB -->
+<section data-transition="fade-in fade-out">
+  <h3>Step 3: what to register with Python</h3>
+  <pre class="x50"><code class="cpp" data-trim data-noescape>
+  // main.mm for Tetrix (excerpt)
+  PyImport_AppendInittab("PySide6.QtCore",     PyInit_QtCore);
+  PyImport_AppendInittab("PySide6.QtGui",      PyInit_QtGui);
+  PyImport_AppendInittab("PySide6.QtWidgets",  PyInit_QtWidgets);
+  PyImport_AppendInittab("PySide6.QtOpenGL",   PyInit_QtOpenGL);
+  PyImport_AppendInittab("PySide6.QtSvg",      PyInit_QtSvg);
+  PyImport_AppendInittab("shiboken6.Shiboken", PyInit_Shiboken);
+  </code></pre>
+  <ul class="x70">
+    <li class="fragment">Tetrix imports <code>QtCore</code>, <code>QtGui</code>, <code>QtWidgets</code>. Where do <code>QtOpenGL</code> and <code>QtSvg</code> come from?</li>
+    <li class="fragment">From the <b>plugins</b>: the iOS platform plugin links QtOpenGL, the SVG plugin links QtSvg</li>
+    <li class="fragment">Register everything that is linked, not only what you import</li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>This is the real generated main.mm for the Tetrix example</li>
+      <li>Tetrix imports three modules; the closure from step 1 has five
+        <ul>
+          <li>libqios.prl lists QtOpenGL, libqsvg.prl lists QtSvg; verified in the .prl files of the wheel</li>
+        </ul>
+      </li>
+      <li>Why register all of them
+        <ul>
+          <li>A linked binding module can pull in another one while it initializes</li>
+          <li>An unregistered one fails at runtime with "libshiboken: could not import module", even though your own code never imports it</li>
+        </ul>
+      </li>
+      <li>Only modules that have a lib&lt;Module&gt;.a get an entry: the closure also contains pure C++ Qt internals (QtQmlModels and similar) that have no PyInit_ symbol</li>
+      <li>A PySide-only module with no Qt library behind it (QtQmlFeatures) is added without reading a .prl</li>
+      <li>shiboken6.Shiboken is always registered</li>
+      <li>This is also why a module missing from the kit is a silent problem: it is dropped from all three lists, the app links and starts, then fails on import (limits slide)</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 20. STARTUP SEQUENCE -->
+<section data-transition="fade-in fade-out">
+  <h3>Startup: Qt's entry point first, Python second</h3>
+  <ol class="x70">
+    <li class="fragment"><code>_qt_main_wrapper</code> is the binary's entry point (<code>libQt6EntryPoint.a</code>), as in any Qt for iOS app</li>
+    <li class="fragment">Qt runs <code>UIApplicationMain</code>, then calls our <code>main()</code> on its <b>reserved stack</b></li>
+    <li class="fragment"><code>main()</code> fills the inittab, then <code>Py_InitializeFromConfig</code>: isolated config, UTF-8 mode, home inside the bundle</li>
+    <li class="fragment"><code>PyRun_SimpleFile(main.py)</code>: your script creates <code>QApplication</code> and calls <code>exec()</code></li>
+    <li class="fragment"><code>exec()</code> jumps back out to <code>UIApplicationMain</code>; iOS drives the event loop</li>
+  </ol>
+  <aside class="notes">
+    <ul>
+      <li>The generated project sets LD_ENTRY_POINT to _qt_main_wrapper and links libQt6EntryPoint.a, which is exactly what Qt's own CMake finalizer does for an iOS app
+        <ul>
+          <li>It is not in any module's .prl, so the tool adds it explicitly</li>
+        </ul>
+      </li>
+      <li>What Qt does, as I read qtentrypoint_ios.mm in qtbase
+        <ul>
+          <li>qt_main_wrapper reserves a stack, then calls UIApplicationMain</li>
+          <li>From applicationDidFinishLaunching, a trampoline runs the user's main() on the reserved stack</li>
+          <li>When main() reaches QApplication::exec(), the event dispatcher longjmps back, so UIApplicationMain can spin the run loop at the level iOS expects</li>
+          <li>Later run-loop callbacks jump back into the user stack to process events</li>
+        </ul>
+      </li>
+      <li>Consequence for us: the whole Python interpreter, and the Python frames of your script, live on Qt's reserved stack
+        <ul>
+          <li>It works today; Tetrix and the QML examples run this way</li>
+          <li>Qt's default size for that stack is 512 KB (Info.plist key QtRunLoopIntegrationStackSize), capped below 1 MB; we leave it at the default</li>
+          <li>We have not measured Python's stack use under deep call chains: open item</li>
+        </ul>
+      </li>
+      <li>Python side of main()
+        <ul>
+          <li>PyPreConfig with UTF-8 mode before anything touches locale state</li>
+          <li>PyConfig_InitIsolatedConfig, bytecode writing off, argc/argv passed so QApplication(sys.argv) works</li>
+          <li>sys.path: stdlib, lib-dynload, packages, bundle root</li>
+        </ul>
+      </li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 21. WHAT IT LOOKS LIKE IN THE BUNDLE -->
+<section data-transition="fade-in fade-out">
+  <h3>What ends up in the app bundle</h3>
+  <div class="columns c60-40 v-center">
+   <div>
+    <pre class="x50"><code class="nohighlight" data-trim data-noescape>
+    pyside_app_demo.app/
+      pyside_app_demo_bin       Qt + PySide6 + libshiboken6
+      Frameworks/Python.framework
+      python/lib/python3.15/    standard library
+      packages/PySide6/         .py and .pyi only
+      packages/shiboken6/
+      main.py                   + your other .py, QML dirs
+      Info.plist
+    </code></pre>
+   </div>
+   <div>
+    <ul class="x70">
+      <li class="fragment">No Qt or PySide6 <code>.a</code>, headers or <code>.so</code> files in the bundle</li>
+      <li class="fragment">Python files are plain files; no <code>.pyc</code> is written</li>
+      <li class="fragment">Why <code>packages/PySide6</code> at all? The package <code>__init__</code> and helpers still need to be importable</li>
+    </ul>
+   </div>
+  </div>
+  <aside class="notes">
+    <ul>
+      <li>Three Xcode build phases fill the bundle
+        <ul>
+          <li>Process Python libraries: the standard library, using the xcframework's own install script</li>
+          <li>Copy PySide6 packages: rsync of PySide6 and shiboken6 without static libs, headers, pycache</li>
+          <li>Copy Python packages: your entry script and the other local .py files at their relative paths, plus app-local QML directories</li>
+        </ul>
+      </li>
+      <li>The C extension modules are built into the binary, but the Python side of PySide6 is still a normal package that has to be on sys.path</li>
+      <li>The executable gets its own name (suffix _bin) so it cannot collide with a directory inside the bundle</li>
+      <li>Python.xcframework is embedded and code-signed on copy; this is the one part that stays a framework</li>
+      <li>The generated project also turns off Xcode's debug dylib split, to keep one self-contained binary</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 22. PLATFORM DETAILS -->
+<section data-transition="fade-in fade-out">
+  <h3>Platform details we ran into</h3>
+  <ul class="x70 tight">
+    <li class="fragment">Six Darwin <b>permission plugins</b> are always imported, so the <code>Info.plist</code> always carries all six usage descriptions</li>
+    <li class="fragment"><code>QtNetwork</code> needs <code>-lresolv</code>; it is in no <code>.prl</code></li>
+    <li class="fragment">Deployment target is read from the kit's <code>qt.toolchain.cmake</code>; a lower value is refused</li>
+    <li class="fragment">Wheel archives are <b>thin</b>: one binary per target, no universal binary</li>
+    <li class="fragment">Python runs in UTF-8 mode, isolated from any environment</li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>Permission plugins
+        <ul>
+          <li>PySide6's glue always Q_IMPORT_PLUGINs the six Darwin permission plugins, so they are always in the binary</li>
+          <li>A permission plugin present without its NS*UsageDescription key gave errors in Xcode, so the generated Info.plist contains all six: camera, microphone, bluetooth, contacts, calendar, location</li>
+          <li>Hence it cannot be made per-app: the registration is baked into a PySide6 build shared by every app</li>
+        </ul>
+      </li>
+      <li>-lresolv provides the _res_9_* DNS symbols for QtNetwork; not a framework, so the .prl parsing does not surface it</li>
+      <li>Deployment target: [ios] deployment_target in the spec, empty by default and then taken from CMAKE_OSX_DEPLOYMENT_TARGET in the kit's toolchain file
+        <ul>
+          <li>A value lower than the kit's own minimum is rejected, because the app would claim support for OS versions its own Qt binaries cannot run on</li>
+          <li>The empty value is deliberately never written back, so it keeps meaning "follow Qt" across Qt upgrades</li>
+        </ul>
+      </li>
+      <li>Thin archives: PySide6's own .a files are built per target
+        <ul>
+          <li>The generated project does not pin SDKROOT or EXCLUDED_ARCHS per target; the wheel decides what links</li>
+          <li>One project for both device and simulator is not solved; we generate one project per target</li>
+        </ul>
+      </li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 23. PYTHON PACKAGES -->
+<section data-transition="fade-in fade-out">
+  <h3>Python packages on iOS</h3>
+  <div class="columns c50-50">
+   <div>
+    <h5><i class="python-yellow">Pure Python</i></h5>
+    <ul class="x70">
+      <li>Works if you copy the folder next to your code; data files are not bundled</li>
+    </ul>
+   </div>
+   <div>
+    <h5><i class="red">Packages with compiled code</i></h5>
+    <ul class="x70">
+      <li>NumPy, Pillow, anything with C inside</li>
+      <li>Same problem PySide6 itself had: static linking</li>
+      <li>Not handled by the tool yet</li>
+    </ul>
+   </div>
+  </div>
+  <p class="x70 fragment">Today the bundle carries <i class="python-yellow">your code</i>, PySide6 and Shiboken, nothing else.</p>
+  <aside class="notes">
+    <ul>
+      <li>Question you will get: can I use my favourite package? Two cases</li>
+      <li>Pure Python: just source files
+        <ul>
+          <li>Copy the package folder next to your code: bundled and works</li>
+          <li>Not supported yet: declaring it as a dependency</li>
+          <li>Anything that is not a .py file (data files) is not copied</li>
+        </ul>
+      </li>
+      <li>Compiled extensions
+        <ul>
+          <li>Need a build for iOS; a desktop wheel will not work</li>
+          <li>Today the tool copies PySide6 and shiboken6 into the bundle and your .py files to the root, nothing else</li>
+          <li>Same consequence of static linking as PySide6 itself: the extension has to be built for iOS, linked in and registered before Python starts</li>
+        </ul>
+      </li>
+      <li>This is the same two-registries story, one more time, for code that is not ours</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 24. DEMO -->
+<section data-transition="fade-in fade-out" data-background-image="img/background_cover.svg">
+  <h1 class="r-fit-text">Demo: <i class="qt-neon">Tetrix</i> in the Simulator</h1>
+  <div class="flow">
+    <div class="flow-step"><code>tetrix.py</code></div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="flow-step"><code>pyside6-ios-deploy</code></div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="flow-step">Xcode</div>
+    <span class="flow-arrow">&rarr;</span>
+    <div class="flow-step">Running game</div>
+  </div>
+  <aside class="notes">
+    <ul>
+      <li>Live with Tetrix: a Widgets example from the PySide6 repo, everyone can play</li>
+      <li>Plain Python file, no iOS-specific code in it</li>
+      <li>Steps
+        <ul>
+          <li>Run pyside6-ios-deploy with the simulator wheels: finishes in seconds</li>
+          <li>Show the generated main.mm: the Q_IMPORT_PLUGIN list and the inittab are what we just discussed</li>
+          <li>Open the Xcode project, pick a simulator, press Run</li>
+          <li>Play: a few moves, rotate a piece, drop it</li>
+        </ul>
+      </li>
+      <li>Debugging
+        <ul>
+          <li>Python files do not show up in Xcode's project navigator</li>
+          <li>Whatever the app prints appears in Xcode's console: print debugging works</li>
+        </ul>
+      </li>
+      <li>Pre-build once before the talk, and keep the recorded clip as a fallback</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 25. WHAT TETRIX LINKS -->
+<section data-transition="fade-in fade-out">
+  <h3>What Tetrix linked</h3>
+  <ul class="x70">
+    <li class="fragment">3 imports: <code>QtCore</code>, <code>QtGui</code>, <code>QtWidgets</code></li>
+    <li class="fragment"><b>5</b> Qt modules, 5 PySide6 modules (plugins pulled in <code>QtOpenGL</code> and <code>QtSvg</code>)</li>
+    <li class="fragment"><b>12</b> static plugins: platform, 4 image formats, SVG icons, 6 permissions</li>
+    <li class="fragment"><b>5</b> bundled libraries and <b>6</b> resource initializers</li>
+    <li class="fragment"><b>19</b> Apple frameworks</li>
+  </ul>
+  <p class="x60 fragment">From the generated project: 31 static archives in total, none of them chosen by hand.</p>
+  <aside class="notes">
+    <ul>
+      <li>Counted from the generated Tetrix project for the arm64 simulator
+        <ul>
+          <li>31 archives (archive.ar entries in project.pbxproj): 5 Qt modules, 12 plugins, 5 bundled libs, libQt6EntryPoint, 5 PySide6 binding archives, libshiboken6, Shiboken, libpyside6</li>
+          <li>6 qrc_*_init.cpp.o resource initializers linked as object files</li>
+          <li>19 Apple frameworks, from the closure of .prl files (IOKit through Photos, AVFoundation, CoreBluetooth, CoreLocation and others)</li>
+        </ul>
+      </li>
+      <li>Nobody listed these: the only input is Tetrix's three imports</li>
+      <li>Recount against the current wheel and tool before the talk if either was rebuilt</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 26. PHYSICAL DEVICE -->
+<section data-transition="fade-in fade-out">
+  <h3>The same app on a <i class="qt-lemon">real device</i></h3>
+  <p class="x70">That clip from the beginning: this is all it took.</p>
+  <div class="columns c40-60 v-center">
+   <div>
+    <ul class="x70">
+      <li class="fragment">Same <code>main.py</code>, nothing changed</li>
+      <li class="fragment">Build with the <b>device</b> wheels (<code>ios_arm64</code>)</li>
+      <li class="fragment">Pass your Apple Developer team: <code>--team-id</code></li>
+      <li class="fragment">Xcode signs and installs it</li>
+    </ul>
+   </div>
+   <div>
+    <img src="img/Team_and_bundleID.png" alt="Xcode Signing &amp; Capabilities tab showing the team and bundle identifier" />
+   </div>
+  </div>
+  <aside class="notes">
+    <ul>
+      <li>Same app, same code, only different wheels</li>
+      <li>The tool takes the target from the wheels: device wheels give a device project</li>
+      <li>Team ID is used for code signing, only needed for device builds</li>
+      <li>Xcode signs the app and installs it on the phone: the clip from the beginning</li>
+      <li>Signing is standard Apple tooling, not specific to PySide6</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 27. STATUS -->
+<section data-transition="fade-in fade-out">
+  <h3>Status</h3>
+  <ul class="x70">
+    <li class="fragment"><i class="qt-neon">Works</i>: simulator and physical device</li>
+    <li class="fragment"><i class="qt-neon">Works</i>: Widgets and QML apps</li>
+    <li class="fragment"><i class="qt-neon">Works</i>: add-on modules installed into the kit, <b>Qt PDF</b> confirmed</li>
+    <li class="fragment"><i class="qt-neon">Part of PySide 6.12</i>, released together with Qt 6.12</li>
+    <li class="fragment"><i class="qt-lemon">App Store submission</i>: not verified yet, feedback welcome</li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>Works today: simulator and physical device, Widgets and QML apps</li>
+      <li>Qt PDF: not in the default kit, because it lives in the qtwebengine repo
+        <ul>
+          <li>Installed into an existing Qt for iOS with qt-configure-module, then the wheels are cross-compiled again</li>
+          <li>No PySide6 change was needed: the binding is picked up by find_package</li>
+          <li>Qt's own docs never say whether Qt PDF works on iOS; now it is confirmed</li>
+          <li>Qt WebEngine itself is a different matter and not expected to work</li>
+        </ul>
+      </li>
+      <li>Part of PySide 6.12, which ships with Qt 6.12</li>
+      <li>Cannot say yet: App Store review, because no app has been submitted, so I will not claim you can ship it</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 28. LIMITS -->
+<section data-transition="fade-in fade-out">
+  <h3>Known limits</h3>
+  <ul class="x70 tight">
+    <li class="fragment">Official <i class="qt-neon">Qt for iOS</i> kit only: static, framework layout. Custom builds are not supported</li>
+    <li class="fragment">The module set follows the kit. A module missing from it is dropped <b>silently</b>, and fails at <code>import</code></li>
+    <li class="fragment">One wheel set per target, tied to one Python version</li>
+    <li class="fragment">C-extension packages are not supported</li>
+    <li class="fragment"><code>sys.exit(app.exec())</code> ends the process with <code>exit()</code>, not by returning from <code>main()</code></li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>Custom Qt builds
+        <ul>
+          <li>The generated project assumes the .framework layout of the official kit: lib/&lt;Module&gt;.framework with the .prl inside</li>
+          <li>A non-framework build (-no-framework: lib/libQt6Core.a plus include/) is reachable in principle and not supported; deliberate decision, because we know of no need for it yet</li>
+          <li>Qt for iOS can also be built shared, but the tool assumes static archives</li>
+          <li>If you need it, tell us; I cannot promise a date</li>
+        </ul>
+      </li>
+      <li>Silent drop
+        <ul>
+          <li>The wheel only has bindings for modules that were in the kit it was built against</li>
+          <li>A module named in the app but not in the wheel is skipped in the link list, the plugin list and the inittab, with no diagnostic</li>
+          <li>The app links and launches, then dies with ModuleNotFoundError on import</li>
+          <li>First thing to check when you see No module named PySide6.QtX: the wheel's module list</li>
+          <li>A real build-time diagnostic is on the roadmap</li>
+        </ul>
+      </li>
+      <li>Per-target wheels: no universal binary, and the cp315 tag ties a wheel to a Python version</li>
+      <li>C extensions: covered on the packages slide</li>
+      <li>sys.exit and the event loop
+        <ul>
+          <li>Every PySide app ends with sys.exit(app.exec()); PyRun_SimpleFile turns an uncaught SystemExit into a direct C exit()</li>
+          <li>Reproduced in a standalone program: the process ends right there</li>
+          <li>Qt's entry point expects main() to return when exec() ends: it records the exit code, restores the stack limit, and lets iOS terminate normally</li>
+          <li>In normal use iOS suspends apps instead of the app quitting; it matters for an explicit Quit action and for testing</li>
+          <li>Not fixed yet</li>
+        </ul>
+      </li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 29. DISCUSSION -->
+<section data-transition="fade-in fade-out">
+  <h3>Where we would like input from Qt</h3>
+  <ul class="x70 tight">
+    <li class="fragment"><b>Plugin metadata</b> without CMake: class names only live in the CMake target files. Is there a supported way to ask a kit what a module needs?</li>
+    <li class="fragment"><b>Kit contents</b>: add-ons such as Qt PDF need <code>qt-configure-module</code>. Which should the iOS kit include?</li>
+    <li class="fragment"><b>Entry point</b>: Python runs on Qt's reserved stack, and <code>exit()</code> skips Qt's return path. What do embedders need to know?</li>
+    <li class="fragment"><b>Build system</b>: a generated Xcode project, or a CMake project that reuses Qt's finalizers?</li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>This is the slide for the discussion; these are the places where the PySide side runs into Qt's build metadata
+        <ul>
+          <li>Pick one or two depending on who is in the room</li>
+        </ul>
+      </li>
+      <li>1. Plugin metadata
+        <ul>
+          <li>For each static plugin we need the class name for Q_IMPORT_PLUGIN. Today we match archive paths against IMPORTED_LOCATION_RELEASE in lib/cmake and read QT_PLUGIN_CLASS_NAME</li>
+          <li>The same problem for QML plugins and their dependency on other QML modules, which we recover from resource object paths in the .prl</li>
+          <li>Question: is there, or should there be, build-system-neutral metadata for this?</li>
+        </ul>
+      </li>
+      <li>2. Kit contents
+        <ul>
+          <li>The module set of a PySide6 wheel is the module set of the kit</li>
+          <li>Qt PDF works when installed with qt-configure-module; which add-ons should be part of the kit that the wheels are built from?</li>
+        </ul>
+      </li>
+      <li>3. Entry point
+        <ul>
+          <li>The interpreter lives on the reserved user-main stack (512 KB by default, QtRunLoopIntegrationStackSize); we have not measured deep Python call chains</li>
+          <li>Python's exit() path versus Qt's expectation that main() returns after exec()</li>
+        </ul>
+      </li>
+      <li>4. Build system
+        <ul>
+          <li>Today: generate main.mm, Info.plist and project.pbxproj directly, and replicate what qt_finalize_target does</li>
+          <li>Alternative: generate a CMake project and let Qt's finalizers do the plugin work, adding only the Python parts</li>
+          <li>Which one would Qt contributors rather maintain?</li>
+          <li>My answer for why we did it this way: &lt;your answer&gt;</li>
+        </ul>
+      </li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 30. TAKEAWAYS -->
+<section data-transition="fade-in fade-out">
+  <h3>Takeaways</h3>
+  <ul class="x80">
+    <li class="fragment">On iOS Qt <b>and</b> PySide6 are static: two registries, filled at <i class="qt-lemon">build</i> time</li>
+    <li class="fragment">The tool does not guess: it reads the kit's own <code>.prl</code> and CMake target files</li>
+    <li class="fragment">Two stages: build the wheels once, <code>pyside6-ios-deploy</code> every time</li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>Three things to remember
+        <ul>
+          <li>Static linking means two registries: Q_IMPORT_PLUGIN for Qt, the inittab for Python</li>
+          <li>Both lists are derived from what the Qt kit ships with, so the kit decides what an app can use</li>
+          <li>Build the wheels once, run pyside6-ios-deploy every time</li>
+        </ul>
+      </li>
+      <li>Your PySide6 app already runs on iOS: same Python, same Qt, same code as on desktop</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 31. ROADMAP -->
+<section data-transition="fade-in fade-out">
+  <h3>Roadmap</h3>
+  <ul class="x70">
+    <li class="fragment"><i class="qt-neon">Qt 6.12</i> is out; <i class="python-yellow">PySide 6.12</i> ships this support</li>
+    <li class="fragment"><i class="qt-lemon">Third-party packages</i>: the big missing piece, and the hard one</li>
+    <li class="fragment">A real diagnostic when a Qt module is dropped</li>
+    <li class="fragment">A clean exit path for <code>sys.exit()</code></li>
+    <li class="fragment">More examples</li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>Qt 6.12 is out, PySide 6.12 ships this support</li>
+      <li>Next: a build-time diagnostic for dropped modules, more tested examples, third-party package support, fixing the exit path</li>
+      <li>Third-party support is a natural consequence of static linking
+        <ul>
+          <li>A C-extension package has the same problem PySide6 had, so it needs the same treatment: an iOS-built static archive, linked in and registered before Python starts</li>
+          <li>Why it is hard, and why it is the headline item</li>
+        </ul>
+      </li>
+      <li>I will not name dates</li>
+      <li>The input from the previous slide decides how some of these get solved</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 32. TRY IT -->
+<section data-transition="fade-in fade-out">
+  <h3>Try it, break it, tell us</h3>
+  <ul class="x70">
+    <li class="fragment">Docs: <i class="qt-neon">https://doc.qt.io/qtforpython-6/deployment/deployment-pyside6-ios-deploy.html</i></li>
+    <li class="fragment">Bug tracker: <i class="qt-neon">bugreports.qt.io</i> (project PYSIDE)</li>
+    <li class="fragment">Source and examples: <i class="qt-neon">code.qt.io/cgit/pyside/pyside-setup</i></li>
+    <li class="fragment">Slides: <i class="qt-neon">github.com/cinucen/PySide6-iOS-QtCS2026</i></li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>Try a small app and tell us what breaks</li>
+      <li>Code to read: tools/cross_compile_ios (stage 1) and sources/pyside-tools/deploy_lib/ios (stage 2)
+        <ul>
+          <li>ios_dependency.py: .prl walking and plugin class names</li>
+          <li>main_mm.py: the generated entry point</li>
+          <li>pbxproj.py: the Xcode project</li>
+        </ul>
+      </li>
+      <li>Bugs: bugreports.qt.io, project PYSIDE</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- 33. QUESTIONS -->
+<section data-no-header data-transition="fade-in fade-out" class="full-slide">
+  <div class="columns c60-40 v-center">
+   <div>
+    <h2 class="w400">Questions?</h2>
+    <hr class="yellow-line"/>
+    <h4><i class="qt-neon w300">Ece Cinüçen</i></h4>
+    <h5 class="w400">
+      <img class="clean-img" src="img/github_white.png"> cinucen<br>
+      <img class="clean-img" src="img/linkedin.png"> ecinucen
+    </h5>
+    <p class="x50">github.com/cinucen/PySide6-iOS-QtCS2026</p>
+   </div>
+  </div>
+  <img class="side-image w-40" src="img/PPT-section-images-05.jpg" />
+  <aside class="notes">
+    <ul>
+      <li>Thank you! Questions?</li>
+      <li>Why not qt_add_executable and Qt's CMake? &lt;your answer&gt;; see the discussion slide</li>
+      <li>Can I use shared Qt for iOS? Not supported; the generated project assumes the official static kit</li>
+      <li>Can I use my own Qt build? Official kit only for now; non-framework layouts are a deliberate non-goal today</li>
+      <li>Can I use QML? Yes, Widgets and QML both work</li>
+      <li>Can I use package X? Pure Python if you copy it next to your code; C extensions not yet</li>
+      <li>Other add-on modules? They come with the kit: install into the kit with qt-configure-module and rebuild the wheels (Qt PDF confirmed)</li>
+      <li>App Store? Not verified, so not claiming it</li>
+      <li>Android parity? &lt;your answer&gt;; backup slide has the side-by-side</li>
+      <li>What about PyQt? Separate project with a very similar API; not covered here</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- ============================================================
+     BACKUP
+     ============================================================ -->
+
+<section data-transition="fade-in fade-out" data-background-image="img/background_cover.svg">
+  <h1 class="r-fit-text"><i class="qt-neon">Backup</i></h1>
+</section>
+
+<!-- B1. ANDROID VS IOS -->
+<section data-transition="fade-in fade-out">
+  <h3>Android and iOS side by side</h3>
+  <div class="columns c50-50 v-start">
+   <div>
+    <h5><i class="python-yellow">Android</i></h5>
+    <ul class="x60">
+      <li>Wheel tag: <code>cp310-abi3-android_aarch64</code></li>
+      <li>Qt and PySide6 as shared libraries</li>
+      <li>Packaged by <code>buildozer</code> and python-for-android</li>
+      <li>Tool output: a finished APK or AAB</li>
+    </ul>
+   </div>
+   <div>
+    <h5><i class="qt-neon">iOS</i></h5>
+    <ul class="x60">
+      <li>Wheel tag: <code>cp315-cp315-ios_arm64</code></li>
+      <li>Qt and PySide6 as static archives</li>
+      <li>Python from python.org's XCframework</li>
+      <li>Tool output: an Xcode project; Xcode builds and signs</li>
+    </ul>
+   </div>
+  </div>
+  <p class="x60">Shared: two stages, the target read from the wheel, settings in <code>pysidedeploy.spec</code></p>
+  <aside class="notes">
+    <ul>
+      <li>Wheel tags are from the released 6.12.0 wheels: the Android wheel is abi3, the iOS wheel is tied to Python 3.15</li>
+      <li>Android runtime comes through buildozer and recipes for python-for-android that initialise PySide6 and shiboken6; iOS uses the Python.xcframework from python.org directly</li>
+      <li>Android deploy produces the final package (APK in debug mode, AAB in release); iOS deploy ends at the Xcode project, so signing and installing are Xcode's job</li>
+      <li>Same on both: separate heavy cross-compile stage, deploy tool that reads the arch from the wheel name, and the pysidedeploy.spec configuration</li>
+    </ul>
+  </aside>
+</section>
+
+<!-- B2. HARDENING -->
+<section data-transition="fade-in fade-out">
+  <h3>Hardening the generator</h3>
+  <ul class="x70">
+    <li class="fragment">Values written into <code>project.pbxproj</code> are escaped, so config text cannot add keys</li>
+    <li class="fragment">Paths in the generated build-phase shell scripts are quoted</li>
+    <li class="fragment">Wheels are extracted with a path-checked extractor</li>
+    <li class="fragment">The Python XCframework download is checked against a pinned SHA-256</li>
+    <li class="fragment">Config and download code carry Qt's security review tags</li>
+  </ul>
+  <aside class="notes">
+    <ul>
+      <li>The tool turns configuration and archives it did not write into a build project and shell scripts, so it is treated as handling untrusted input
+        <ul>
+          <li>pbxproj values: quoted and escaped, so quotes, backslashes, semicolons and newlines cannot break out of a value</li>
+          <li>Shell phases: paths go through shlex.quote</li>
+          <li>Wheel extraction: safe_extractall, shared with the other deploy tools</li>
+          <li>XCframework: sha256 of the python.org archive is pinned in the tool and verified on download and on every cached use</li>
+        </ul>
+      </li>
+      <li>The source files carry the Qt-Security header (score and reason): critical for the config and download code, significant for the generators</li>
+      <li>I am not claiming complete input validation of every option; do not oversell this slide</li>
+    </ul>
+  </aside>
+</section>
+
+    </div>
+  </div>
+
+  <!-- Header/footer content copied into the deck by js/deck.js -->
+  <div id="hidden" style="display: none;">
+    <div id="header">
+      <div id="header-left" style="margin-top: 20px; margin-left: 20px; font-size: 12pt;">
+        <img style="width: 100px;" src="img/qt_white.png" />
+      </div>
+      <div id="header-right"></div>
+      <div id="footer-left">
+        <p style="font-size: 16pt; margin-left: 20px;">
+          <i class="python-yellow">Qt Contributors Summit 2026</i>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script src="reveal.js/dist/reveal.js"></script>
+  <script src="reveal.js/dist/plugin/notes.js"></script>
+  <script src="reveal.js/dist/plugin/markdown.js"></script>
+  <script src="reveal.js/dist/plugin/highlight.js"></script>
+  <script src="js/deck.js"></script>
+</body>
+</html>
