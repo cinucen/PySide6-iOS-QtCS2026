@@ -134,13 +134,22 @@
   </aside>
 </section>
 
-<!-- 4. DESKTOP AND ANDROID: DYNAMIC -->
+<!-- 4. DYNAMIC VS STATIC -->
 <section data-transition="fade-in fade-out">
-  <h3>Desktop and Android load everything at <i class="qt-lemon">runtime</i></h3>
-  <ul class="x70">
-    <li class="fragment"><code>import PySide6.QtWidgets</code> loads <code>QtWidgets.abi3.so</code>, which links against Qt's shared libraries</li>
-    <li class="fragment">Qt loads its plugins from disk when it needs them</li>
-  </ul>
+  <h3>On iOS it all becomes <i class="qt-lemon">one program</i></h3>
+  <div class="columns c50-50 v-start">
+   <div>
+    <h5><i class="python-yellow">Desktop and Android</i></h5>
+    <p class="x70 fragment"><code>import PySide6.QtWidgets</code> loads a shared library, which links against Qt's shared libraries.</p>
+    <p class="x70 fragment">Qt loads its plugins from disk when it needs them.</p>
+   </div>
+   <div>
+    <h5><i class="qt-neon">iOS</i></h5>
+    <p class="x70 fragment"><i class="qt-neon">Qt for iOS</i> is static, so PySide6 is built static too.</p>
+    <p class="x70 fragment">Everything is linked into the app binary when you build it.</p>
+   </div>
+  </div>
+  <p class="x70 fragment">Decided at <i class="qt-lemon">build</i> time, not at <i class="python-yellow">import</i> time.</p>
   <aside class="notes">
     <ul>
       <li>Baseline everybody should have in mind before iOS
@@ -161,7 +170,16 @@
           <li>The Android tool produces a finished package; the iOS tool will produce an Xcode project</li>
         </ul>
       </li>
-      <li>iOS itself can load signed frameworks shipped in the bundle; the constraint comes from Qt, next slides</li>
+      <li>iOS: why PySide6 is static
+        <ul>
+          <li>Not an Apple rule: iOS loads dynamic frameworks shipped inside the app (Python's own iOS support packages extension modules that way)</li>
+          <li>The official Qt for iOS kit is static; Qt's CMake finalizers import and link static plugins for C++ apps</li>
+          <li>Dynamic PySide6 modules built against the static kit gave duplicate symbol problems</li>
+          <li>A shared Qt for iOS is possible but not the default, and I could not get it to build</li>
+          <li>So PySide6 is cross-compiled static and linked into the app together with Qt</li>
+        </ul>
+      </li>
+      <li>So: decided at build time, not at import time; nothing is loaded when you import, so every module has to be registered before Python starts</li>
       <li>Everything that follows is about what replaces each of these runtime lookups on iOS</li>
     </ul>
   </aside>
@@ -171,11 +189,11 @@
      PART 2: PYSIDE6 ON IOS
      ============================================================ -->
 
-<section data-transition="fade-in fade-out" data-background-image="img/background_cover.svg">
+<!-- <section data-transition="fade-in fade-out" data-background-image="img/background_cover.svg">
   <h1 class="r-fit-text"><i class="python-yellow">Python</i> on an <i class="qt-neon">iPhone</i></h1>
-</section>
+</section> -->
 
-<!-- 5. TEASER: PROVE IT FIRST -->
+<!-- 5. TEASER: PROVE IT FIRST
 <section data-transition="fade-in fade-out">
   <h3>This already works</h3>
   <video src="img/ios-device.mp4" controls preload="metadata" playsinline style="max-height: 460px;"></video>
@@ -188,7 +206,7 @@
       <li>Shown first, before the mechanism</li>
     </ul>
   </aside>
-</section>
+</section> -->
 
 <!-- 6. WHAT IOS ASKS OF US -->
 <section data-transition="fade-in fade-out">
@@ -197,7 +215,6 @@
     <li class="fragment">No system Python: <i class="python-yellow">interpreter and standard library ship inside the app</i></li>
     <li class="fragment">Builds need <i class="qt-neon">Xcode</i>'s toolchain and the iOS SDK</li>
     <li class="fragment">Simulator and device are <b>different targets</b>, so different binaries</li>
-    <li class="fragment"><i class="qt-neon">Qt for iOS</i> is static, so PySide6 is cross-compiled static too</li>
   </ul>
   <aside class="notes">
     <ul>
@@ -218,15 +235,6 @@
         <ul>
           <li>An arm64 simulator binary and an arm64 device binary are both arm64, but different platforms (Mach-O LC_BUILD_VERSION)</li>
           <li>Hence one wheel set per target later</li>
-        </ul>
-      </li>
-      <li>Last bullet: why PySide6 is static
-        <ul>
-          <li>Not an Apple rule: iOS loads dynamic frameworks shipped inside the app (Python's own iOS support packages extension modules that way)</li>
-          <li>The official Qt for iOS kit is static; Qt's CMake finalizers import and link static plugins for C++ apps</li>
-          <li>Dynamic PySide6 modules built against the static kit gave duplicate symbol problems</li>
-          <li>A shared Qt for iOS is possible but not the default, and I could not get it to build</li>
-          <li>So PySide6 is cross-compiled static and linked into the app together with Qt</li>
         </ul>
       </li>
     </ul>
@@ -385,7 +393,7 @@
    <div>
     <h5>What to link</h5>
     <pre class="x50"><code class="plaintext" data-trim data-noescape>
-    # # from QtWidgets.prl
+    # from QtWidgets.prl
     -framework QtGui; -framework QtCore;
     -framework UIKit;
     libQt6BundledHarfbuzz.a;
@@ -669,42 +677,58 @@
 
 <!-- 14. PYTHON PACKAGES -->
 <section data-transition="fade-in fade-out">
-  <h3>Python packages on iOS</h3>
-  <div class="columns c50-50">
+  <h3>Third-party Python packages</h3>
+  <div class="columns c50-50 v-start">
    <div>
-    <h5><i class="python-yellow">Pure Python</i></h5>
-    <ul class="x70">
-      <li>Works if you copy the folder next to your code; data files are not bundled</li>
-    </ul>
+    <h5>1. Find them</h5>
+    <pre class="x50"><code class="ini" data-trim data-noescape>
+    # pysidedeploy.spec
+    [ios]
+    packages = numpy,requests
+    </code></pre>
+    <p class="x60 fragment">Listed in the spec, or found by scanning your imports.</p>
    </div>
    <div>
-    <h5><i class="red">Packages with compiled code</i></h5>
-    <ul class="x70">
-      <li>NumPy, Pillow, anything with C inside</li>
-      <li>Same problem PySide6 itself had: static linking</li>
-      <li>Not handled by the tool yet</li>
-    </ul>
+    <h5>2. The tool installs them for iOS</h5>
+    <pre class="x40"><code class="bash" data-trim data-noescape>
+    # run by pyside6-ios-deploy, on every deploy
+    pip install --target site-packages \
+        --platform ios_..._arm64_iphonesimulator \
+        --only-binary :all: \
+        --extra-index-url &lt;BeeWare index&gt; ...
+    </code></pre>
+    <p class="x60 fragment">Nothing to do by hand: iOS wheels come from PyPI, or BeeWare's index for compiled packages, and are copied into the app.</p>
    </div>
   </div>
-  <p class="x70 fragment">Today the bundle carries <i class="python-yellow">your code</i>, PySide6 and Shiboken, nothing else.</p>
+  <p class="x60 fragment">Compiled packages stay dynamic: their extension modules become frameworks, as PEP 730 intends. Only Qt and PySide6 are static.</p>
   <aside class="notes">
     <ul>
-      <li>Question you will get: can I use my favourite package? Two cases</li>
-      <li>Pure Python: just source files
+      <li>New in this version: pyside6-ios-deploy installs third-party packages</li>
+      <li>Finding them
         <ul>
-          <li>Copy the package folder next to your code: bundled and works</li>
-          <li>Not supported yet: declaring it as a dependency</li>
-          <li>Anything that is not a .py file (data files) is not copied</li>
+          <li>[ios] packages in pysidedeploy.spec, comma separated, with optional version pins</li>
+          <li>Plus a scan of your .py files: imports that are not stdlib, PySide6 or your own modules, mapped to the installed distribution that provides them</li>
+          <li>The merged list is written back to the spec, so you can see and edit it</li>
+          <li>Every entry is validated before it reaches pip, so a spec value cannot pass pip options</li>
         </ul>
       </li>
-      <li>Compiled extensions
+      <li>Installing them: done by pyside6-ios-deploy itself, the user never runs pip
         <ul>
-          <li>Need a build for iOS; a desktop wheel will not work</li>
-          <li>Today the tool copies PySide6 and shiboken6 into the bundle and your .py files to the root, nothing else</li>
-          <li>Same consequence of static linking as PySide6 itself: the extension has to be built for iOS, linked in and registered before Python starts</li>
+          <li>Runs on every deploy, whether or not the packages are already there</li>
+          <li>pip with a PEP 730 platform tag built from the deployment target, arch and device or simulator</li>
+          <li>Binary wheels only: nothing is compiled on your machine</li>
+          <li>Compiled packages come from BeeWare's package index when PyPI has no iOS wheel</li>
+          <li>Pinning: BeeWare's iOS builds are post-releases (numpy 2.5.0.post1), so pin with numpy==2.5.0.* rather than numpy==2.5.0</li>
         </ul>
       </li>
-      <li>This is the same two-registries story, one more time, for code that is not ours</li>
+      <li>Bundling
+        <ul>
+          <li>Installed into deployment/&lt;target&gt;/site-packages, copied into packages/ in the app</li>
+          <li>The xcframework's install script turns each package's .so files into frameworks, the PEP 730 layout</li>
+        </ul>
+      </li>
+      <li>Ties back to slide 4: iOS loads dynamic code that ships in the app; PySide6 is static only because the Qt kit is</li>
+      <li>Limit: a package without an iOS wheel on PyPI or BeeWare's index cannot be installed</li>
     </ul>
   </aside>
 </section>
@@ -806,7 +830,7 @@
     <li class="fragment">Official <i class="qt-neon">Qt for iOS</i> kit only: static, framework layout. Custom builds are not supported</li>
     <li class="fragment">The module set follows the kit. A module missing from it is dropped <b>silently</b>, and fails at <code>import</code></li>
     <li class="fragment">One wheel set per target, tied to one Python version</li>
-    <li class="fragment">C-extension packages are not supported</li>
+    <li class="fragment">Third-party packages need an iOS wheel, on PyPI or BeeWare's index</li>
     <li class="fragment"><code>sys.exit(app.exec())</code> ends the process with <code>exit()</code>, not by returning from <code>main()</code></li>
   </ul>
   <aside class="notes">
@@ -829,7 +853,7 @@
         </ul>
       </li>
       <li>Per-target wheels: no universal binary, and the cp315 tag ties a wheel to a Python version</li>
-      <li>C extensions: covered on the packages slide</li>
+      <li>Third-party packages: pip only installs binary wheels for the iOS platform tag; a package with no iOS wheel cannot be installed (packages slide)</li>
       <li>sys.exit and the event loop
         <ul>
           <li>Every PySide app ends with sys.exit(app.exec()); PyRun_SimpleFile turns an uncaught SystemExit into a direct C exit()</li>
@@ -940,7 +964,6 @@
   <h3>Roadmap</h3>
   <ul class="x70">
     <li class="fragment"><i class="qt-neon">Qt 6.12</i> is out; <i class="python-yellow">PySide 6.12</i> ships this support</li>
-    <li class="fragment"><i class="qt-lemon">Third-party packages</i>: the big missing piece, and the hard one</li>
     <li class="fragment">A real diagnostic when a Qt module is dropped</li>
     <li class="fragment">A clean exit path for <code>sys.exit()</code></li>
     <li class="fragment">More examples</li>
@@ -948,13 +971,8 @@
   <aside class="notes">
     <ul>
       <li>Qt 6.12 is out, PySide 6.12 ships this support</li>
-      <li>Next: a build-time diagnostic for dropped modules, more tested examples, third-party package support, fixing the exit path</li>
-      <li>Third-party support is a natural consequence of static linking
-        <ul>
-          <li>A C-extension package has the same problem PySide6 had, so it needs the same treatment: an iOS-built static archive, linked in and registered before Python starts</li>
-          <li>Why it is hard, and why it is the headline item</li>
-        </ul>
-      </li>
+      <li>Next: a build-time diagnostic for dropped modules, more tested examples, fixing the exit path</li>
+      <li>Third-party packages are no longer on this list: they are supported now (packages slide)</li>
       <li>I will not name dates</li>
       <li>The input from the previous slide decides how some of these get solved</li>
     </ul>
@@ -1007,7 +1025,7 @@
       <li>Can I use shared Qt for iOS? Not supported; the generated project assumes the official static kit</li>
       <li>Can I use my own Qt build? Official kit only for now; non-framework layouts are a deliberate non-goal today</li>
       <li>Can I use QML? Yes, Widgets and QML both work</li>
-      <li>Can I use package X? Pure Python if you copy it next to your code; C extensions not yet</li>
+      <li>Can I use package X? Yes, if it is pure Python or has an iOS wheel on PyPI or BeeWare's index; list it in [ios] packages, or just import it if it is installed in your environment</li>
       <li>Other add-on modules? They come with the kit: install into the kit with qt-configure-module and rebuild the wheels (Qt PDF confirmed)</li>
       <li>App Store? Not verified, so not claiming it</li>
       <li>Android parity? &lt;your answer&gt;; backup slide has the side-by-side</li>
