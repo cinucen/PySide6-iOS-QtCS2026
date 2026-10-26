@@ -440,7 +440,7 @@
       </li>
       <li>2. Start Python
         <ul>
-          <li>Qt's own iOS entry point runs first, like in any Qt app</li>
+          <li>Qt's own iOS entry point runs first, like in any Qt for iOS app</li>
           <li>It starts the iOS app, then calls our main()</li>
           <li>main(): registers, starts Python, runs main.py</li>
           <li>main.py creates QApplication, calls exec(); from there iOS runs the event loop</li>
@@ -718,7 +718,7 @@
       <li>PyQt? Separate project, not covered</li>
       <li>Security, if asked: the tool turns settings and downloads into a project and scripts, so treated as untrusted input
         <ul>
-          <li>Values in the Xcode project escaped, can't add anything</li>
+          <li>Values in the Xcode project escaped, can't break out or add keys</li>
           <li>Paths in the build scripts quoted</li>
           <li>Wheels unpacked with a path-checked extractor</li>
           <li>Python download checked against a fixed checksum, also when cached</li>
