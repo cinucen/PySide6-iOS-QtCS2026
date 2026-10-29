@@ -514,7 +514,6 @@
     <p class="x60 fragment">iOS wheels from PyPI, or BeeWare's index for compiled packages.</p>
    </div>
   </div>
-  <p class="x60 fragment">Compiled packages stay dynamic (PEP 730). Only Qt and PySide6 are static.</p>
   <aside class="notes">
     <ul>
       <li>So far Qt and PySide6; most apps import more</li>
@@ -591,7 +590,6 @@
   <ul class="x70">
     <li class="fragment"><i class="qt-neon">Works</i>: simulator and physical device</li>
     <li class="fragment"><i class="qt-neon">Works</i>: Widgets and QML apps</li>
-    <li class="fragment"><i class="qt-neon">Works</i>: add-on modules installed into the kit, <b>Qt PDF</b> confirmed</li>
     <li class="fragment"><i class="qt-neon">Part of PySide 6.12</i>, released together with Qt 6.12</li>
     <li class="fragment"><i class="qt-lemon">App Store submission</i>: not verified yet, feedback welcome</li>
   </ul>
@@ -659,8 +657,9 @@
     <ul>
       <li>6.12 is out, ships all of this</li>
       <li>Next: a clear error when a module is missing, more tested examples</li>
-      <li>Packages are done, so off the list</li>
-      <li>No dates</li>
+      <li>Packages are done for now, so off the list, I'm not sure we need to find a way to cross-compile packages by ourselves, or is it enough to rely on sources like beeware?</li>
+      <li>Claude find: Not exiting cleanly but need to dig deep.</li>
+      <li>I recently noticed that the apps on the device are big in size, so probably I did forget to exlude some libs and the apps get bloated. This is sth that I'll look into as well.</li>
     </ul>
   </aside>
 </section>
